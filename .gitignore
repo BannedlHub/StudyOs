@@ -1,0 +1,38 @@
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+secrets/
+
+# User data and local databases
+user-data/
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Backups
+backup/
+backups/
+yedekler/
+*.bak
+*.backup
+*.old
+*.orig
+*-backup.html
+*-yedek.html
+studyos-before-*.html
+studyos-qa-*.html
+
+# Temporary and generated files
+*.tmp
+*.temp
+*.log
+*.swp
+*.swo
+*~
+node_modules/
+dist/
+coverage/
+Thumbs.db
+.DS_Store
