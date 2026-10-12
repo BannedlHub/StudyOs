@@ -30,7 +30,12 @@ const relDays=n=> n===0?"bugün": n===1?"dün": n===-1?"yarın": n>0?n+" gün ö
 
 /* ---------- 2) Sabitler & modeller ---------- */
 const STORAGE_KEY="studyos-data"; const DATA_VERSION=1; const QUESTION_STATS_VERSION=1;
-const SCHOOL_SCHEDULE_DB="studyos-media"; const SCHOOL_SCHEDULE_STORE="assets"; const SCHOOL_SCHEDULE_KEY="weekly-schedule";
+const SCHOOL_SCHEDULE_DB="studyos-media"; const SCHOOL_SCHEDULE_DB_VERSION=2;
+const SCHOOL_SCHEDULE_STORE="assets"; const QUESTION_IMAGE_STORE="question-images"; const SCHOOL_SCHEDULE_KEY="weekly-schedule";
+const QUESTION_SUBJECTS=["Matematik","Fizik","Kimya","Biyoloji","Diğer"];
+const QUESTION_REASONS=["Konuyu bilmiyorum","Yöntem bulamadım","İşlem hatası","Dikkatsizlik","Diğer"];
+const QUESTION_STATUSES=["Çözemedim","Tekrar çözeceğim","Öğrendim"];
+const QUESTION_IMAGE_MAX_SIZE=15*1024*1024;
 const TOPIC_STATUS={baslanmadi:"Başlanmadı",calisiliyor:"Çalışılıyor",tekrar:"Tekrar Gerekli",ogrenildi:"Öğrenildi"};
 const SESSION_TYPES={konu:"Konu öğrenme",soru:"Soru çözümü",tekrar:"Tekrar",deneme:"Deneme sınavı",odev:"Ödev"};
 const PRIOS={1:{l:"Yüksek",c:"var(--danger)"},2:{l:"Normal",c:"var(--warn)"},3:{l:"Düşük",c:"var(--faint)"}};
@@ -40,16 +45,20 @@ const FEEDBACK={kolay:"Kolaydı",zor:"Zordu",hatirlayamadim:"Hatırlayamadım"};
 
 function schoolScheduleRequest(action,value){
   return new Promise((resolve,reject)=>{
-    let request;
-    try{request=indexedDB.open(SCHOOL_SCHEDULE_DB,1);}
-    catch(e){reject(e);return;}
+    let request,settled=false;
+    const fail=error=>{if(!settled){settled=true;reject(error);}};
+    try{request=indexedDB.open(SCHOOL_SCHEDULE_DB,SCHOOL_SCHEDULE_DB_VERSION);}
+    catch(e){fail(e);return;}
     request.onupgradeneeded=()=>{
       const db=request.result;
       if(!db.objectStoreNames.contains(SCHOOL_SCHEDULE_STORE))db.createObjectStore(SCHOOL_SCHEDULE_STORE,{keyPath:"key"});
+      if(!db.objectStoreNames.contains(QUESTION_IMAGE_STORE))db.createObjectStore(QUESTION_IMAGE_STORE,{keyPath:"key"});
     };
-    request.onerror=()=>reject(request.error||new Error("IndexedDB açılamadı."));
+    request.onerror=()=>fail(request.error||new Error("IndexedDB açılamadı."));
+    request.onblocked=()=>fail(new Error("Medya deposu başka bir StudyOS sekmesinde açık. Diğer sekmeyi kapatıp yeniden deneyin."));
     request.onsuccess=()=>{
       const db=request.result;
+      if(settled){db.close();return;}
       let tx,result;
       try{
         tx=db.transaction(SCHOOL_SCHEDULE_STORE,action==="get"?"readonly":"readwrite");
@@ -57,16 +66,47 @@ function schoolScheduleRequest(action,value){
         const op=action==="get"?store.get(SCHOOL_SCHEDULE_KEY):
           action==="put"?store.put(value):store.delete(SCHOOL_SCHEDULE_KEY);
         op.onsuccess=()=>{result=op.result;};
-        op.onerror=()=>{reject(op.error||new Error("Okul programı depolama işlemi başarısız oldu."));};
-        tx.oncomplete=()=>{db.close();resolve(result);};
-        tx.onerror=()=>{db.close();reject(tx.error||new Error("Okul programı depolama işlemi başarısız oldu."));};
-        tx.onabort=()=>{db.close();reject(tx.error||new Error("Okul programı depolama işlemi iptal edildi."));};
-      }catch(e){db.close();reject(e);}
+        op.onerror=()=>fail(op.error||new Error("Okul programı depolama işlemi başarısız oldu."));
+        tx.oncomplete=()=>{db.close();if(!settled){settled=true;resolve(result);}};
+        tx.onerror=()=>{db.close();fail(tx.error||new Error("Okul programı depolama işlemi başarısız oldu."));};
+        tx.onabort=()=>{db.close();fail(tx.error||new Error("Okul programı depolama işlemi iptal edildi."));};
+      }catch(e){db.close();fail(e);}
     };
   });
 }
 
-function decodeSchoolScheduleImage(file){
+function questionImageRequest(action,key,value){
+  return new Promise((resolve,reject)=>{
+    let request,settled=false;
+    const fail=error=>{if(!settled){settled=true;reject(error);}};
+    try{request=indexedDB.open(SCHOOL_SCHEDULE_DB,SCHOOL_SCHEDULE_DB_VERSION);}
+    catch(error){fail(error);return;}
+    request.onupgradeneeded=()=>{
+      const db=request.result;
+      if(!db.objectStoreNames.contains(SCHOOL_SCHEDULE_STORE))db.createObjectStore(SCHOOL_SCHEDULE_STORE,{keyPath:"key"});
+      if(!db.objectStoreNames.contains(QUESTION_IMAGE_STORE))db.createObjectStore(QUESTION_IMAGE_STORE,{keyPath:"key"});
+    };
+    request.onerror=()=>fail(request.error||new Error("IndexedDB açılamadı."));
+    request.onblocked=()=>fail(new Error("Medya deposu başka bir StudyOS sekmesinde açık. Diğer sekmeyi kapatıp yeniden deneyin."));
+    request.onsuccess=()=>{
+      const db=request.result;
+      if(settled){db.close();return;}
+      let tx,result;
+      try{
+        tx=db.transaction(QUESTION_IMAGE_STORE,action==="get"?"readonly":"readwrite");
+        const store=tx.objectStore(QUESTION_IMAGE_STORE);
+        const op=action==="get"?store.get(key):action==="put"?store.put(value):store.delete(key);
+        op.onsuccess=()=>{result=op.result;};
+        op.onerror=()=>fail(op.error||new Error("Soru fotoğrafı depolama işlemi başarısız oldu."));
+        tx.oncomplete=()=>{db.close();if(!settled){settled=true;resolve(result);}};
+        tx.onerror=()=>{db.close();fail(tx.error||new Error("Soru fotoğrafı depolama işlemi başarısız oldu."));};
+        tx.onabort=()=>{db.close();fail(tx.error||new Error("Soru fotoğrafı depolama işlemi iptal edildi."));};
+      }catch(error){db.close();fail(error);}
+    };
+  });
+}
+
+function decodeImage(file){
   return new Promise((resolve,reject)=>{
     const url=URL.createObjectURL(file),image=new Image();
     image.onload=()=>{
@@ -80,33 +120,64 @@ function decodeSchoolScheduleImage(file){
   });
 }
 
-async function validateSchoolScheduleImage(file){
+function imageMimeFromHeader(header){
+  const isPng=header.length>=8&&header[0]===0x89&&header[1]===0x50&&header[2]===0x4e&&header[3]===0x47&&
+    header[4]===0x0d&&header[5]===0x0a&&header[6]===0x1a&&header[7]===0x0a;
+  const isJpeg=header.length>=3&&header[0]===0xff&&header[1]===0xd8&&header[2]===0xff;
+  const isWebp=header.length>=12&&String.fromCharCode(...header.subarray(0,4))==="RIFF"&&
+    String.fromCharCode(...header.subarray(8,12))==="WEBP";
+  return isPng?"image/png":isJpeg?"image/jpeg":isWebp?"image/webp":null;
+}
+
+async function validateImageFile(file,label){
   if(!file)return "Önce bir görsel seçin.";
   const mimeByExtension={jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",webp:"image/webp"};
   const extension=file.name.split(".").pop().toLowerCase(),expectedMime=mimeByExtension[extension];
-  if(!expectedMime)return "Yalnızca JPG, JPEG, PNG veya WebP görselleri yüklenebilir.";
+  if(!expectedMime)return `${label} için yalnızca JPG, JPEG, PNG veya WebP yüklenebilir.`;
   if(file.type&&file.type.toLowerCase()!==expectedMime)return "Dosya uzantısı ile görsel türü eşleşmiyor.";
   if(file.size===0)return "Seçilen dosya boş.";
-  if(file.size>15*1024*1024)return "Görsel en fazla 15 MB olabilir.";
+  if(file.size>QUESTION_IMAGE_MAX_SIZE)return `${label} en fazla 15 MB olabilir.`;
   try{
     const header=new Uint8Array(await file.slice(0,12).arrayBuffer());
-    const isPng=header.length>=8&&header[0]===0x89&&header[1]===0x50&&header[2]===0x4e&&header[3]===0x47&&
-      header[4]===0x0d&&header[5]===0x0a&&header[6]===0x1a&&header[7]===0x0a;
-    const isJpeg=header.length>=3&&header[0]===0xff&&header[1]===0xd8&&header[2]===0xff;
-    const isWebp=header.length>=12&&String.fromCharCode(...header.subarray(0,4))==="RIFF"&&
-      String.fromCharCode(...header.subarray(8,12))==="WEBP";
-    const actualMime=isPng?"image/png":isJpeg?"image/jpeg":isWebp?"image/webp":null;
+    const actualMime=imageMimeFromHeader(header);
     if(actualMime!==expectedMime)return "Dosyanın gerçek görsel biçimi uzantısıyla eşleşmiyor veya desteklenmiyor.";
-    await decodeSchoolScheduleImage(file);
+    await decodeImage(file);
   }catch(error){
     return error?.message||"Dosya geçerli bir görsel olarak açılamadı.";
   }
   return null;
 }
 
+async function validateImportedQuestionImage(blob,mime){
+  if(!(blob instanceof Blob)||blob.size===0||blob.size>QUESTION_IMAGE_MAX_SIZE)
+    throw new Error("Yedekteki soru fotoğrafı boş veya 15 MB sınırını aşıyor.");
+  if(!["image/jpeg","image/png","image/webp"].includes(mime)||blob.type!==mime)
+    throw new Error("Yedekteki soru fotoğrafının biçimi geçersiz.");
+  const header=new Uint8Array(await blob.slice(0,12).arrayBuffer());
+  if(imageMimeFromHeader(header)!==mime)throw new Error("Yedekteki soru fotoğrafının içeriği biçimiyle eşleşmiyor.");
+  await decodeImage(blob);
+}
+
+function imageDataToBlob(data){
+  const match=/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]*={0,2})$/.exec(data);
+  if(!match||match[2].length%4!==0)throw new Error("Yedekteki soru fotoğrafı geçerli bir Base64 görseli değil.");
+  const binary=atob(match[2]),bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  return {blob:new Blob([bytes],{type:match[1]}),mime:match[1]};
+}
+
+function blobToDataURL(blob){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result);
+    reader.onerror=()=>reject(reader.error||new Error("Soru fotoğrafı yedek için okunamadı."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function defaultSettings(){return{ name:"",theme:"dark",weekStart:1,dailyTargetMin:180,dailyMaxMin:300,
   studyDays:[1,2,3,4,5,6],restDays:[0],sessionLen:40,breakLen:10,examWarnDays:5,dateStyle:"uzun",demoActive:true };}
-function blankState(){return{ version:DATA_VERSION, questionStatsVersion:QUESTION_STATS_VERSION, settings:defaultSettings(), subjects:[],topics:[],exams:[],tasks:[],sessions:[],reviewLog:[],activeSession:null };}
+function blankState(){return{ version:DATA_VERSION, questionStatsVersion:QUESTION_STATS_VERSION, settings:defaultSettings(), subjects:[],topics:[],exams:[],tasks:[],sessions:[],reviewLog:[],questionArchive:[],activeSession:null };}
 
 /* ---------- 3) Depolama (versiyonlu, korumalı) ---------- */
 let storageOK=true;
@@ -120,7 +191,7 @@ function loadState(){
     const s=blankState();
     // Gevşek birleştirme: bilinen alanlar + tip koruması (migrasyon zemini)
     s.settings={...s.settings,...(parsed.settings||{})};
-    for(const k of["subjects","topics","exams","tasks","sessions","reviewLog"])
+    for(const k of["subjects","topics","exams","tasks","sessions","reviewLog","questionArchive"])
       s[k]=Array.isArray(parsed[k])?parsed[k].filter(x=>x&&x.id):[];
     s.activeSession=parsed.activeSession&&parsed.activeSession.startedAt?parsed.activeSession:null;
     s.questionStatsVersion=parsed.questionStatsVersion||0;
@@ -252,6 +323,7 @@ function validateBackupState(input){
     if(!Array.isArray(input[key]))backupError(key+" listesi eksik.");
   for(const key of ["exams","tasks","reviewLog"])
     if(input[key]!=null&&!Array.isArray(input[key]))backupError(key+" listesi geçersiz.");
+  if(input.questionArchive!=null&&!Array.isArray(input.questionArchive))backupError("soru arşivi listesi geçersiz.");
   if(input.questionStatsVersion!=null&&input.questionStatsVersion>QUESTION_STATS_VERSION)
     backupError("daha yeni bir soru istatistiği sürümü desteklenmiyor.");
 
@@ -366,6 +438,25 @@ function validateBackupState(input){
     return {...item,id:uniqueId(item.id,label),topicId:backupId(item.topicId,label+" konu"),
       date:backupDay(item.date,label+" tarihi"),feedback};
   });
+  result.questionArchive=(input.questionArchive||[]).map((item,i)=>{
+    if(!item||typeof item!=="object"||Array.isArray(item))backupError("arşiv sorusu geçersiz.");
+    const label="Arşiv sorusu "+(i+1),subject=backupText(item.subject,label+" dersi",30);
+    if(!QUESTION_SUBJECTS.includes(subject))backupError(label+" dersi tanınmıyor.");
+    const reason=backupText(item.reason,label+" nedeni",40),status=backupText(item.status,label+" durumu",30);
+    if(!QUESTION_REASONS.includes(reason))backupError(label+" çözüm nedeni tanınmıyor.");
+    if(!QUESTION_STATUSES.includes(status))backupError(label+" durumu tanınmıyor.");
+    const imageId=item.imageId==null?null:backupId(item.imageId,label+" fotoğraf kimliği");
+    const imageData=item.imageData==null?null:backupText(item.imageData,label+" fotoğrafı",Math.ceil(QUESTION_IMAGE_MAX_SIZE*4/3)+64);
+    if((imageId&&!imageData)||(!imageId&&imageData))backupError(label+" fotoğraf verisi eksik veya eşleşmiyor.");
+    if(imageData&&(!/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]*={0,2}$/.test(imageData)||
+      imageData.split(",")[1].length%4!==0))backupError(label+" fotoğraf verisi geçersiz.");
+    return {...item,id:uniqueId(item.id,label),subject,
+      topic:backupText(item.topic,label+" konusu",120),
+      reason,notes:backupText(item.notes,label+" notu",5000,true),
+      solution:backupText(item.solution,label+" çözümü",5000,true),
+      createdAt:backupTimestamp(item.createdAt,label+" oluşturulma zamanı"),
+      status,imageId,imageData};
+  });
   const settings=input.settings??{};
   if(!settings||typeof settings!=="object"||Array.isArray(settings))backupError("ayarlar geçersiz.");
   for(const [key,allowed] of [["theme",["dark","light"]],["dateStyle",["uzun","kısa"]]])
@@ -406,7 +497,10 @@ lastSavedStateJSON=JSON.stringify(S);
 const UI={route:"overview",topicQ:"",topicSubj:"all",topicStatus:"all",topicSort:"exam",topicSel:new Set(),
   calY:new Date().getFullYear(),calM:new Date().getMonth(),plannerView:"hafta",plannerDate:todayKey(),
   anaRange:"7",anaFrom:addDaysKey(todayKey(),-29),anaTo:todayKey(),anaSubj:"all",
-  schoolScheduleRequest:0,schoolScheduleUrl:null,schoolScheduleSaving:false};
+  schoolScheduleRequest:0,schoolScheduleUrl:null,schoolScheduleSaving:false,
+  questionSubject:"all",questionTopic:"",questionStatus:"all",questionSearch:"",
+  questionArchiveRender:0,questionArchiveUrls:[],questionModalUrl:null,questionModalRequest:0,
+  backupImportRequest:0};
 
 /* ---------- 6) Türetiler (hesaplamalar) ---------- */
 const subjectById=id=>S.subjects.find(x=>x.id===id);
@@ -527,6 +621,9 @@ function toast(msg,type="ok",dur=3200){
 }
 let modalKeydown=null;
 function openModal({title,body,footer,wide,onMount}){
+  UI.questionModalRequest++;
+  UI.backupImportRequest++;
+  if(UI.questionModalUrl){URL.revokeObjectURL(UI.questionModalUrl);UI.questionModalUrl=null;}
   const root=$("#modal-root");
   root.innerHTML=`<div class="overlay" data-ov="1"><div class="dialog${wide?" wide":""}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
     <div class="dlg-head"><h3>${esc(title)}</h3><button class="btn btn-ghost btn-icon" onclick="closeModal()" aria-label="Kapat"><i data-lucide="x"></i></button></div>
@@ -538,7 +635,13 @@ function openModal({title,body,footer,wide,onMount}){
   lucide.createIcons(); if(onMount)onMount();
   const f=root.querySelector("input,select,textarea,button:not(.btn-ghost)"); if(f)f.focus();
 }
-function closeModal(){ $("#modal-root").innerHTML=""; if(modalKeydown){document.removeEventListener("keydown",modalKeydown);modalKeydown=null;} }
+function closeModal(){
+  $("#modal-root").innerHTML="";
+  UI.questionModalRequest++;
+  UI.backupImportRequest++;
+  if(UI.questionModalUrl){URL.revokeObjectURL(UI.questionModalUrl);UI.questionModalUrl=null;}
+  if(modalKeydown){document.removeEventListener("keydown",modalKeydown);modalKeydown=null;}
+}
 function confirmDialog({title,message,confirmText="Sil",onConfirm}){
   openModal({title,body:`<p style="color:var(--muted);font-size:13.5px;line-height:1.55">${message}</p>`,
     footer:`<button class="btn" onclick="closeModal()">Vazgeç</button><button class="btn btn-danger" id="cf-btn"><i data-lucide="trash-2"></i>${esc(confirmText)}</button>`,
@@ -558,6 +661,7 @@ const ROUTES={
   planner:{t:"Çalışma Planı",i:"calendar-range",render:renderPlanner},
   exams:{t:"Sınav Takvimi",i:"calendar-days",render:renderExams},
   sessions:{t:"Çalışma Oturumları",i:"timer",render:renderSessions},
+  "question-archive":{t:"Soru Arşivi",i:"archive",render:renderQuestionArchive},
   analytics:{t:"İlerleme Analizi",i:"bar-chart-3",render:renderAnalytics},
   review:{t:"Tekrar Merkezi",i:"rotate-ccw",render:renderReview},
   settings:{t:"Ayarlar ve Veri",i:"settings",render:renderSettings},
@@ -600,6 +704,11 @@ function renderShell(){
 }
 function render(){
   const v=$("#view"); if(!v){renderShell();}
+  if(UI.route!=="question-archive"){
+    UI.questionArchiveRender++;
+    UI.questionArchiveUrls.forEach(url=>URL.revokeObjectURL(url));
+    UI.questionArchiveUrls=[];
+  }
   if(UI.route!=="school-schedule"&&UI.schoolScheduleUrl){
     URL.revokeObjectURL(UI.schoolScheduleUrl);
     UI.schoolScheduleUrl=null;
@@ -1114,6 +1223,109 @@ function renderReview(v){
   </div></div>`;
 }
 
+/* ---------- 16) Bölüm: Soru Arşivi ---------- */
+function questionStatusBadge(status){
+  const cls=status==="Öğrendim"?"b-ok":status==="Tekrar çözeceğim"?"b-warn":"b-mut";
+  return `<span class="badge ${cls}">${esc(status)}</span>`;
+}
+function releaseQuestionArchiveUrls(){
+  UI.questionArchiveUrls.forEach(url=>URL.revokeObjectURL(url));
+  UI.questionArchiveUrls=[];
+}
+function renderQuestionArchive(v){
+  const topics=[...new Set(S.questionArchive.map(q=>q.topic).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"tr"));
+  v.innerHTML=pageHead("Soru Arşivi","Çözemediğin soruları kaydet, tekrar çöz ve öğrendiklerini işaretle",
+    `<button class="btn btn-primary" onclick="App.questionModal()"><i data-lucide="plus"></i>Soru ekle</button>`)+
+    `<div class="card question-filters">
+      ${fld("Ders",`<select aria-label="Ders filtresi" onchange="App.setQuestionFilter('subject',this.value)">
+        <option value="all">Tüm dersler</option>${QUESTION_SUBJECTS.map(subject=>`<option value="${esc(subject)}" ${UI.questionSubject===subject?"selected":""}>${esc(subject)}</option>`).join("")}</select>`)}
+      ${fld("Konu",`<select aria-label="Konu filtresi" onchange="App.setQuestionFilter('topic',this.value)">
+        <option value="">Tüm konular</option>${topics.map(topic=>`<option value="${esc(topic)}" ${UI.questionTopic===topic?"selected":""}>${esc(topic)}</option>`).join("")}</select>`)}
+      ${fld("Durum",`<select aria-label="Durum filtresi" onchange="App.setQuestionFilter('status',this.value)">
+        <option value="all">Tüm durumlar</option>${QUESTION_STATUSES.map(status=>`<option value="${esc(status)}" ${UI.questionStatus===status?"selected":""}>${esc(status)}</option>`).join("")}</select>`)}
+      ${fld("Konu ve notlarda ara",`<input type="search" value="${esc(UI.questionSearch)}" placeholder="Örn. türev, ipucu…" oninput="App.searchQuestions(this.value)" aria-label="Konu ve notlarda ara">`)}
+    </div><div id="question-archive-list" aria-live="polite"></div>`;
+  renderQuestionArchiveList();
+}
+function renderQuestionArchiveList(){
+  releaseQuestionArchiveUrls();
+  const request=++UI.questionArchiveRender,target=$("#question-archive-list");
+  if(!target)return;
+  const query=UI.questionSearch.trim().toLocaleLowerCase("tr-TR");
+  const records=S.questionArchive.filter(question=>{
+    if(UI.questionSubject!=="all"&&question.subject!==UI.questionSubject)return false;
+    if(UI.questionTopic&&question.topic!==UI.questionTopic)return false;
+    if(UI.questionStatus!=="all"&&question.status!==UI.questionStatus)return false;
+    return !query||[question.topic,question.notes,question.solution].some(text=>
+      String(text||"").toLocaleLowerCase("tr-TR").includes(query));
+  }).sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt));
+  if(!records.length){
+    target.innerHTML=`<div class="card empty question-empty"><i data-lucide="archive"></i>
+      <b>${S.questionArchive.length?"Filtreye uygun soru yok":"Arşiv henüz boş"}</b>
+      <p>${S.questionArchive.length?"Filtreleri değiştir veya başka bir kelime ara.":"Çözemediğin bir soruyu fotoğrafıyla ya da fotoğrafsız ekleyebilirsin."}</p>
+    </div>`;
+    lucide.createIcons();
+    return;
+  }
+  target.innerHTML=`<div class="question-list">${records.map(question=>{
+    const created=Number.isFinite(Date.parse(question.createdAt))?
+      new Date(question.createdAt).toLocaleDateString("tr-TR"):"—";
+    return `<article class="card question-card">
+      <div class="question-card-head"><div class="row">
+        <span class="badge b-info">${esc(question.subject)}</span>${questionStatusBadge(question.status)}
+        <span class="small muted">${esc(created)}</span></div>
+        <span class="small muted">${esc(question.reason)}</span></div>
+      <div class="question-card-body">
+        ${question.imageId?`<div class="question-photo" data-question-image="${esc(question.id)}"><span class="small muted">Fotoğraf yükleniyor…</span></div>`:""}
+        <div class="question-copy"><h3>${esc(question.topic)}</h3>
+          ${question.notes?`<div class="question-note"><span class="muted">Notum</span><p>${esc(question.notes)}</p></div>`:""}
+          ${question.solution?`<div class="question-note"><span class="muted">Çözüm / ipucu</span><p>${esc(question.solution)}</p></div>`:""}
+        </div>
+      </div>
+      <div class="question-actions">
+        <button class="btn btn-sm" onclick="App.questionDetail('${esc(question.id)}')"><i data-lucide="eye"></i>Görüntüle</button>
+        <button class="btn btn-sm" onclick="App.questionModal('${esc(question.id)}')"><i data-lucide="pencil"></i>Düzenle</button>
+        ${question.status!=="Öğrendim"?`<button class="btn btn-sm btn-primary" onclick="App.markQuestionLearned('${esc(question.id)}')"><i data-lucide="check"></i>Öğrendim</button>`:""}
+        <button class="btn btn-sm btn-ghost" onclick="App.deleteQuestion('${esc(question.id)}')" aria-label="Soruyu sil"><i data-lucide="trash-2"></i></button>
+      </div>
+    </article>`;
+  }).join("")}</div>`;
+  for(const question of records.filter(item=>item.imageId)){
+    questionImageRequest("get",question.imageId).then(record=>{
+      if(UI.route!=="question-archive"||request!==UI.questionArchiveRender)return;
+      const image=target.querySelector(`[data-question-image="${question.id}"]`);
+      if(!image)return;
+      if(!record||!(record.blob instanceof Blob))throw new Error("Kaydedilmiş soru fotoğrafı bulunamadı.");
+      const url=URL.createObjectURL(record.blob);
+      UI.questionArchiveUrls.push(url);
+      image.innerHTML=`<img src="${url}" alt="${esc(question.topic)} soru fotoğrafı" loading="lazy">`;
+    }).catch(error=>{
+      if(UI.route!=="question-archive"||request!==UI.questionArchiveRender)return;
+      const image=target.querySelector(`[data-question-image="${question.id}"]`);
+      if(image)image.textContent="Fotoğraf yüklenemedi";
+      toast("Soru fotoğrafı yüklenemedi."+ (error?.message?" "+error.message:""),"err",6000);
+    });
+  }
+  lucide.createIcons();
+}
+function loadQuestionModalImage(imageId,targetSelector){
+  if(!imageId)return;
+  const request=++UI.questionModalRequest;
+  questionImageRequest("get",imageId).then(record=>{
+    if(request!==UI.questionModalRequest)return;
+    const target=$(targetSelector);
+    if(!target)return;
+    if(!record||!(record.blob instanceof Blob))throw new Error("Kaydedilmiş soru fotoğrafı bulunamadı.");
+    UI.questionModalUrl=URL.createObjectURL(record.blob);
+    target.innerHTML=`<img src="${UI.questionModalUrl}" alt="Soru fotoğrafı">`;
+  }).catch(error=>{
+    if(request!==UI.questionModalRequest)return;
+    const target=$(targetSelector);
+    if(target)target.textContent="Fotoğraf yüklenemedi.";
+    toast("Soru fotoğrafı yüklenemedi."+ (error?.message?" "+error.message:""),"err",6000);
+  });
+}
+
 /* ---------- 17) Bölüm: Ayarlar ---------- */
 function renderSchoolSchedule(v){
   if(UI.schoolScheduleUrl){URL.revokeObjectURL(UI.schoolScheduleUrl);UI.schoolScheduleUrl=null;}
@@ -1200,13 +1412,144 @@ function renderSettings(v){
       ${st.demoActive?`<div class="row small" style="margin-bottom:10px"><span class="badge b-demo">DEMO</span><span class="muted">Başlangıçta yüklenen örnek oturumlar hâlâ kayıtlarda.</span></div>
       <button class="btn" style="margin-bottom:8px" onclick="App.removeDemo()"><i data-lucide="eraser"></i>Demo verisini kaldır</button>`:""}
       <button class="btn btn-danger" onclick="App.wipeAll()"><i data-lucide="alert-triangle"></i>Tüm verileri sıfırla</button>
-      <div class="help">Sıfırlama, dersler ve konular dahil her şeyi siler ve boş bir çalışma alanı bırakır. Silinen veri geri alınamaz.</div>
+      <div class="help">Sıfırlama, dersler ve konular dahil tüm kayıtları ve soru arşivini siler. Silinen veri geri alınamaz.</div>
     </div>
   </div>`;
 }
 
 /* ---------- 18) Eylemler (App) ---------- */
 const App={
+  setQuestionFilter(filter,value){
+    if(filter==="subject")UI.questionSubject=value;
+    else if(filter==="topic")UI.questionTopic=value;
+    else if(filter==="status")UI.questionStatus=value;
+    render();
+  },
+  searchQuestions(value){
+    UI.questionSearch=value;
+    renderQuestionArchiveList();
+  },
+  questionModal(id){
+    const question=id?S.questionArchive.find(item=>item.id===id):null;
+    if(id&&!question){toast("Arşiv sorusu bulunamadı.","err");return;}
+    const body=fld("Ders",`<select id="qa-subject">${QUESTION_SUBJECTS.map(subject=>
+      `<option value="${esc(subject)}" ${question?.subject===subject?"selected":""}>${esc(subject)}</option>`).join("")}</select>`)+
+      fld("Konu adı",`<input id="qa-topic" maxlength="120" required value="${esc(question?.topic||"")}" placeholder="Örn. İkinci dereceden denklemler">`)+
+      fld("Çözememe nedeni",`<select id="qa-reason">${QUESTION_REASONS.map(reason=>
+        `<option value="${esc(reason)}" ${question?.reason===reason?"selected":""}>${esc(reason)}</option>`).join("")}</select>`)+
+      fld("Kendi notum",`<textarea id="qa-notes" rows="3" maxlength="5000" placeholder="Nerede takıldığını yaz…">${esc(question?.notes||"")}</textarea>`)+
+      fld("Çözüm / ipuçları",`<textarea id="qa-solution" rows="3" maxlength="5000" placeholder="Daha sonra ekleyebilirsin…">${esc(question?.solution||"")}</textarea>`)+
+      fld("Durum",`<select id="qa-status">${QUESTION_STATUSES.map(status=>
+        `<option value="${esc(status)}" ${question?.status===status?"selected":""}>${esc(status)}</option>`).join("")}</select>`)+
+      fld("Soru fotoğrafı (isteğe bağlı)",`<input type="file" id="qa-photo" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+        <div class="help">JPG, PNG veya WebP; en fazla 15 MB. Fotoğraf cihazında IndexedDB içinde saklanır.</div>`)+
+      (question?.imageId?`<div class="question-photo question-modal-photo" id="question-edit-photo"><span class="small muted">Fotoğraf yükleniyor…</span></div>
+        <label class="question-remove-image"><input type="checkbox" id="qa-remove-photo"> Fotoğrafı kaldır</label>`:"");
+    openModal({title:question?"Soruyu düzenle":"Arşive soru ekle",body,
+      footer:`<button class="btn" onclick="closeModal()">Vazgeç</button>
+        <button class="btn btn-primary" onclick="App.saveQuestion('${question?esc(question.id):""}')"><i data-lucide="check"></i>Kaydet</button>`,
+      wide:true});
+    if(question?.imageId)loadQuestionModalImage(question.imageId,"#question-edit-photo");
+  },
+  async saveQuestion(id){
+    const modalRequest=UI.questionModalRequest;
+    const existing=id?S.questionArchive.find(item=>item.id===id):null;
+    if(id&&!existing){toast("Arşiv sorusu bulunamadı.","err");return;}
+    const topic=$("#qa-topic").value.trim();
+    if(!topic){toast("Lütfen konu adını girin.","err");$("#qa-topic").focus();return;}
+    const file=$("#qa-photo").files[0]||null;
+    const values={subject:$("#qa-subject").value,reason:$("#qa-reason").value,
+      notes:$("#qa-notes").value.trim(),solution:$("#qa-solution").value.trim(),
+      status:$("#qa-status").value,removeImage:!!$("#qa-remove-photo")?.checked};
+    if(file){
+      const validationError=await validateImageFile(file,"Soru fotoğrafı");
+      if(modalRequest!==UI.questionModalRequest)return;
+      if(validationError){toast(validationError,"err",6000);return;}
+    }
+    const previousImageId=existing?.imageId||null;
+    let imageId=values.removeImage?null:previousImageId;
+    try{
+      if(file){
+        imageId=uid();
+        const extension=file.name.split(".").pop().toLowerCase();
+        const mime={jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",webp:"image/webp"}[extension];
+        await questionImageRequest("put",imageId,{key:imageId,
+          blob:file.slice(0,file.size,file.type||mime),mime,updatedAt:new Date().toISOString()});
+        if(modalRequest!==UI.questionModalRequest){
+          try{await questionImageRequest("delete",imageId);}
+          catch(error){toast("İptal edilen fotoğraf temizlenemedi."+
+            (error?.message?" "+error.message:""),"warn",6000);}
+          return;
+        }
+      }
+    }catch(error){
+      if(modalRequest!==UI.questionModalRequest)return;
+      toast("Soru fotoğrafı kaydedilemedi. Tarayıcı depolama alanını kontrol edin."+
+        (error?.message?" ("+error.message+")":""),"err",7000);
+      return;
+    }
+    const updated={id:existing?.id||uid(),subject:values.subject,topic,
+      reason:values.reason,notes:values.notes,solution:values.solution,
+      createdAt:existing?.createdAt||new Date().toISOString(),status:values.status,imageId};
+    if(existing)S.questionArchive[S.questionArchive.indexOf(existing)]=updated;
+    else S.questionArchive.push(updated);
+    if(!persist()){
+      if(file&&imageId){
+        try{await questionImageRequest("delete",imageId);}
+        catch(error){toast("Kaydedilemeyen soru fotoğrafı temizlenemedi."+
+          (error?.message?" "+error.message:""),"warn",6000);}
+      }
+      return;
+    }
+    closeModal();render();
+    toast(existing?"Soru güncellendi.":"Soru arşive eklendi.");
+    if(previousImageId&&previousImageId!==imageId){
+      try{await questionImageRequest("delete",previousImageId);}
+      catch(error){toast("Eski fotoğraf temizlenemedi; soru kaydı korunuyor."+
+        (error?.message?" "+error.message:""),"warn",6000);}
+    }
+  },
+  questionDetail(id){
+    const question=S.questionArchive.find(item=>item.id===id);
+    if(!question){toast("Arşiv sorusu bulunamadı.","err");return;}
+    const created=Number.isFinite(Date.parse(question.createdAt))?
+      new Date(question.createdAt).toLocaleString("tr-TR"):"—";
+    const body=`<div class="row" style="margin-bottom:12px"><span class="badge b-info">${esc(question.subject)}</span>
+      ${questionStatusBadge(question.status)}<span class="small muted">${esc(created)}</span></div>
+      <h4 class="question-detail-title">${esc(question.topic)}</h4>
+      <div class="small muted" style="margin-bottom:12px">Çözememe nedeni: ${esc(question.reason)}</div>
+      ${question.imageId?`<div class="question-photo question-detail-photo" id="question-detail-photo"><span class="small muted">Fotoğraf yükleniyor…</span></div>`:""}
+      ${question.notes?`<div class="question-detail-text"><b>Kendi notum</b><p>${esc(question.notes)}</p></div>`:""}
+      ${question.solution?`<div class="question-detail-text"><b>Çözüm / ipuçları</b><p>${esc(question.solution)}</p></div>`:""}`;
+    openModal({title:"Arşiv sorusu",body,wide:true,
+      footer:`<button class="btn" onclick="closeModal()">Kapat</button>
+        <button class="btn" onclick="closeModal();App.questionModal('${esc(question.id)}')"><i data-lucide="pencil"></i>Düzenle</button>
+        ${question.status!=="Öğrendim"?`<button class="btn btn-primary" onclick="App.markQuestionLearned('${esc(question.id)}')"><i data-lucide="check"></i>Öğrendim</button>`:""}`});
+    if(question.imageId)loadQuestionModalImage(question.imageId,"#question-detail-photo");
+  },
+  markQuestionLearned(id){
+    const question=S.questionArchive.find(item=>item.id===id);
+    if(!question){toast("Arşiv sorusu bulunamadı.","err");return;}
+    question.status="Öğrendim";
+    if(!persist())return;
+    closeModal();render();toast("Soru “Öğrendim” olarak işaretlendi.");
+  },
+  deleteQuestion(id){
+    const question=S.questionArchive.find(item=>item.id===id);
+    if(!question){toast("Arşiv sorusu bulunamadı.","err");return;}
+    confirmDialog({title:"Arşiv sorusunu sil",confirmText:"Soruyu sil",
+      message:`<b>${esc(question.topic)}</b> sorusu kalıcı olarak silinecek.`,
+      onConfirm:async()=>{
+        S.questionArchive=S.questionArchive.filter(item=>item.id!==id);
+        if(!persist())return;
+        render();toast("Soru arşivden silindi.");
+        if(question.imageId){
+          try{await questionImageRequest("delete",question.imageId);}
+          catch(error){toast("Soru silindi ancak fotoğraf deposu temizlenemedi."+
+            (error?.message?" "+error.message:""),"warn",6000);}
+        }
+      }});
+  },
   chooseSchoolScheduleImage(){
     if(UI.schoolScheduleSaving)return;
     $("#school-schedule-file")?.click();
@@ -1215,7 +1558,7 @@ const App={
     const file=input.files&&input.files[0]; input.value="";
     if(!file)return;
     try{
-      const validationError=await validateSchoolScheduleImage(file);
+      const validationError=await validateImageFile(file,"Program görseli");
       if(validationError){toast(validationError,"err",5000);return;}
       UI.schoolScheduleSaving=true;
       const content=$("#school-schedule-content");
@@ -1723,12 +2066,26 @@ const App={
     if(!persist())return;closeModal();render();toast("Tekrar planlandı: "+fmtShort(t.nextReviewAt)); },
 
   /* --- Veri --- */
-  exportJSON(){
-    const payload={app:"StudyOS",version:DATA_VERSION,exportedAt:new Date().toISOString(),data:S};
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
-    const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-    a.download="studyos-yedek-"+todayKey()+".json"; a.click(); URL.revokeObjectURL(a.href);
-    toast("Yedek dosyası indirildi.");
+  async exportJSON(){
+    try{
+      const data=JSON.parse(JSON.stringify(S));
+      for(const question of data.questionArchive){
+        if(!question.imageId)continue;
+        const record=await questionImageRequest("get",question.imageId);
+        if(!record||!(record.blob instanceof Blob))
+          throw new Error("“"+question.topic+"” sorusunun fotoğrafı bulunamadı; yedek oluşturulmadı.");
+        question.imageData=await blobToDataURL(record.blob);
+      }
+      const payload={app:"StudyOS",version:DATA_VERSION,exportedAt:new Date().toISOString(),data};
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+      const url=URL.createObjectURL(blob),a=document.createElement("a");
+      a.href=url;a.download="studyos-yedek-"+todayKey()+".json";a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),0);
+      toast("Yedek dosyası indirildi.");
+    }catch(error){
+      toast("JSON yedeği oluşturulamadı; mevcut veriler değiştirilmedi."+
+        (error?.message?" "+error.message:""),"err",7000);
+    }
   },
   importJSON(input){
     const file=input.files&&input.files[0]; input.value="";
@@ -1745,21 +2102,76 @@ const App={
         return;
       }
       const counts={ders:validated.subjects.length,konu:validated.topics.length,sınav:validated.exams.length,
-        görev:validated.tasks.length,"oturum":validated.sessions.length,"tekrar kaydı":validated.reviewLog.length};
+        görev:validated.tasks.length,"oturum":validated.sessions.length,"tekrar kaydı":validated.reviewLog.length,
+        "arşiv sorusu":validated.questionArchive.length,
+        "soru fotoğrafı":validated.questionArchive.filter(question=>question.imageData).length};
       openModal({title:"Yedeği içe aktar",body:
-        `<p class="small muted" style="margin-bottom:12px">Dosyanın yapısı, alanları ve ilişkileri doğrulandı. İçe aktarma <b>mevcut tüm verini değiştirir</b> — üzerine yazma sessizce yapılmaz.</p>
+        `<p class="small muted" style="margin-bottom:12px">Dosyanın yapısı, alanları ve ilişkileri doğrulandı. İçe aktarma <b>mevcut tüm verini değiştirir</b> — üzerine yazma sessizce yapılmaz. Eski yedeklerde arşiv bölümü yoksa boş arşiv kullanılır.</p>
         <div class="card" style="background:var(--surface2);padding:10px 14px">
         ${Object.entries(counts).map(([k,v])=>`<div class="stat-line"><span class="muted">${k}</span><span class="v mono-num">${v}</span></div>`).join("")}</div>
         ${parsed&&parsed.exportedAt?`<div class="help">Yedek tarihi: ${esc(new Date(parsed.exportedAt).toLocaleString("tr-TR"))}</div>`:""}`,
         footer:`<button class="btn" onclick="closeModal()">Vazgeç</button>
           <button class="btn btn-danger" id="imp-go"><i data-lucide="upload"></i>Değiştir ve içe aktar</button>`,
-        onMount:()=>{$("#imp-go").onclick=()=>{
-          S=validated;
-          document.documentElement.dataset.theme=S.settings.theme;
-          if(!persist())return;closeModal();render();toast("Yedek geri yüklendi.");};}});
+        onMount:()=>{$("#imp-go").onclick=()=>App.applyJSONImport(validated);}});
     };
     reader.onerror=()=>toast("Yedek dosyası okunamadı; mevcut veriler değiştirilmedi.","err",6000);
     reader.readAsText(file);
+  },
+  async applyJSONImport(validated){
+    const button=$("#imp-go");
+    if(button)button.disabled=true;
+    const importRequest=++UI.backupImportRequest,prepared=[];
+    const cleanupPreparedImages=async()=>{
+      const failures=[];
+      for(const item of prepared){
+        if(!item.blob)continue;
+        try{await questionImageRequest("delete",item.question.imageId);}
+        catch(error){failures.push(error?.message||"fotoğraf temizlenemedi");}
+      }
+      if(failures.length)toast("İçe aktarılamayan bazı fotoğraflar temizlenemedi."+
+        " "+failures[0],"warn",7000);
+    };
+    try{
+      for(const question of validated.questionArchive){
+        if(importRequest!==UI.backupImportRequest)return;
+        if(!question.imageData){prepared.push({question:{...question,imageId:null}});continue;}
+        const {blob,mime}=imageDataToBlob(question.imageData);
+        await validateImportedQuestionImage(blob,mime);
+        if(importRequest!==UI.backupImportRequest)return;
+        prepared.push({question:{...question,imageId:uid()},blob,mime});
+      }
+      for(const item of prepared){
+        if(importRequest!==UI.backupImportRequest){await cleanupPreparedImages();return;}
+        if(!item.blob)continue;
+        await questionImageRequest("put",item.question.imageId,{key:item.question.imageId,
+          blob:item.blob,mime:item.mime,updatedAt:new Date().toISOString()});
+        if(importRequest!==UI.backupImportRequest){await cleanupPreparedImages();return;}
+      }
+      if(importRequest!==UI.backupImportRequest){await cleanupPreparedImages();return;}
+      const oldImageIds=S.questionArchive.map(question=>question.imageId).filter(Boolean);
+      const questionArchive=prepared.map(({question})=>{
+        const {imageData,...record}=question;
+        return record;
+      });
+      S={...validated,questionArchive};
+      document.documentElement.dataset.theme=S.settings.theme;
+      if(!persist()){await cleanupPreparedImages();return;}
+      closeModal();render();toast("Yedek geri yüklendi.");
+      const retained=new Set(questionArchive.map(question=>question.imageId).filter(Boolean));
+      for(const imageId of oldImageIds){
+        if(retained.has(imageId))continue;
+        try{await questionImageRequest("delete",imageId);}
+        catch(error){toast("Yedek yüklendi ancak eski bir soru fotoğrafı temizlenemedi."+
+          (error?.message?" "+error.message:""),"warn",6000);}
+      }
+    }catch(error){
+      const cancelled=importRequest!==UI.backupImportRequest;
+      await cleanupPreparedImages();
+      if(cancelled)return;
+      if(button)button.disabled=false;
+      toast("Yedek geri yüklenemedi; mevcut veriler korunuyor."+
+        (error?.message?" "+error.message:""),"err",7000);
+    }
   },
   exportCSV(){
     if(!S.sessions.length){toast("Dışa aktarılacak oturum yok.","warn");return;}
@@ -1784,8 +2196,16 @@ const App={
   },
   wipeAll(){
     confirmDialog({title:"Tüm verileri sıfırla",confirmText:"Her şeyi sil",
-      message:`<b>Dersler, konular, sınavlar, görevler, oturumlar ve tekrar geçmişi dahil her şey silinir</b> ve boş bir çalışma alanıyla başlanır. Bu işlem geri alınamaz — önce JSON yedek alman önerilir.`,
-      onConfirm:()=>{S=blankState();if(!persist())return;render();toast("Çalışma alanı sıfırlandı.","ok");}});
+      message:`<b>Dersler, konular, sınavlar, görevler, oturumlar, tekrar geçmişi ve soru arşivi dahil her şey silinir</b> ve boş bir çalışma alanıyla başlanır. Bu işlem geri alınamaz — önce JSON yedek alman önerilir.`,
+      onConfirm:async()=>{
+        const imageIds=S.questionArchive.map(question=>question.imageId).filter(Boolean);
+        S=blankState();if(!persist())return;render();toast("Çalışma alanı sıfırlandı.","ok");
+        for(const imageId of imageIds){
+          try{await questionImageRequest("delete",imageId);}
+          catch(error){toast("Arşiv sıfırlandı ancak bir soru fotoğrafı temizlenemedi."+
+            (error?.message?" "+error.message:""),"warn",6000);}
+        }
+      }});
   },
   shiftPlan, calNav, setRange, setAnaSubj,
 };
