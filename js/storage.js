@@ -17,6 +17,7 @@ function schoolScheduleRequest(action,value){
       if(!db.objectStoreNames.contains(QUESTION_IMAGE_STORE))db.createObjectStore(QUESTION_IMAGE_STORE,{keyPath:"key"});
     };
     request.onerror=()=>fail(request.error||new Error("IndexedDB açılamadı."));
+    /* Başka bir sekmedeki açık bağlantı veritabanı yükseltmesini engeller; beklemek yerine çağırana açık hata döner. */
     request.onblocked=()=>fail(new Error("Medya deposu başka bir StudyOS sekmesinde açık. Diğer sekmeyi kapatıp yeniden deneyin."));
     request.onsuccess=()=>{
       const db=request.result;
@@ -31,6 +32,7 @@ function schoolScheduleRequest(action,value){
         op.onerror=()=>fail(op.error||new Error("Okul programı depolama işlemi başarısız oldu."));
         tx.oncomplete=()=>{db.close();if(!settled){settled=true;resolve(result);}};
         tx.onerror=()=>{db.close();fail(tx.error||new Error("Okul programı depolama işlemi başarısız oldu."));};
+        /* İptal edilen transaction da başarısız bir işlem sayılır; bağlantı kapatılıp hata yukarı taşınır. */
         tx.onabort=()=>{db.close();fail(tx.error||new Error("Okul programı depolama işlemi iptal edildi."));};
       }catch(e){db.close();fail(e);}
     };
@@ -49,6 +51,7 @@ function questionImageRequest(action,key,value){
       if(!db.objectStoreNames.contains(QUESTION_IMAGE_STORE))db.createObjectStore(QUESTION_IMAGE_STORE,{keyPath:"key"});
     };
     request.onerror=()=>fail(request.error||new Error("IndexedDB açılamadı."));
+    /* Başka bir sekmedeki açık bağlantı veritabanı yükseltmesini engeller; beklemek yerine çağırana açık hata döner. */
     request.onblocked=()=>fail(new Error("Medya deposu başka bir StudyOS sekmesinde açık. Diğer sekmeyi kapatıp yeniden deneyin."));
     request.onsuccess=()=>{
       const db=request.result;
@@ -62,6 +65,7 @@ function questionImageRequest(action,key,value){
         op.onerror=()=>fail(op.error||new Error("Soru fotoğrafı depolama işlemi başarısız oldu."));
         tx.oncomplete=()=>{db.close();if(!settled){settled=true;resolve(result);}};
         tx.onerror=()=>{db.close();fail(tx.error||new Error("Soru fotoğrafı depolama işlemi başarısız oldu."));};
+        /* İptal edilen transaction da başarısız bir işlem sayılır; bağlantı kapatılıp hata yukarı taşınır. */
         tx.onabort=()=>{db.close();fail(tx.error||new Error("Soru fotoğrafı depolama işlemi iptal edildi."));};
       }catch(error){db.close();fail(error);}
     };

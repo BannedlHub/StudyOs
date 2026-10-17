@@ -67,6 +67,8 @@ function migrateQuestionStats(state){
   return state;
 }
 
+/* backup* yardımcıları her alanın tipini, sınırını ve biçimini tek noktada doğrular.
+   Doğrulama başarısızsa ortak hata üretir; bozuk veya birbiriyle tutarsız yedek uygulama durumuna karışmaz. */
 function backupError(message){ throw new Error("Yedek doğrulanamadı: "+message); }
 function backupId(value,label){
   if(typeof value!=="string"||! /^[A-Za-z0-9_-]{1,100}$/.test(value))backupError(label+" kimliği geçersiz.");
@@ -97,6 +99,8 @@ function backupTimestampMs(value,label){
   const checked=backupTimestamp(value,label);
   return typeof checked==="number"?checked:Date.parse(checked);
 }
+/* Önce alanları tek tek doğrular, sonra kimlik ve ders/konu ilişkilerini çapraz kontrol eder.
+   İçe aktarma ancak tamamı tutarlı bir durum döndürünce başlayabilir; mevcut kayıt kısmi yedekle ezilmez. */
 function validateBackupState(input){
   if(!input||typeof input!=="object"||Array.isArray(input))backupError("ana kayıt nesnesi eksik.");
   for(const key of ["subjects","topics","sessions"])

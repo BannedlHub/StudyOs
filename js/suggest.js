@@ -9,6 +9,8 @@
 /* Arayüz notu: Recommendations.generate(state) saf bir fonksiyondur; ileride isteğe bağlı bir
    sağlayıcı (plan rafine etme, hata açıklama vb.) aynı imzayla beslenebilir. Sağlayıcı yoksa
    uygulama bu kural tabanlı motorla eksiksiz çalışır. Hiçbir metin uydurma veriye dayanmaz. */
+/* Her kuralı mevcut sınav, konu ve çalışma kayıtlarına uygular; böylece öneriler gerekçelendirilebilir ve uydurma veri içermez.
+   Sonuçları sınırlandırarak Genel Bakış'ı kısa tutar; kurallar yeni verilerle her çalıştırmada yeniden değerlendirilir. */
 const Recommendations={
   generate(){
     const out=[],t=todayKey();
