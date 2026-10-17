@@ -36,3 +36,5 @@ dist/
 coverage/
 Thumbs.db
 .DS_Store
+
+sha256-*.txt
