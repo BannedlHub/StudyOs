@@ -72,4 +72,7 @@ function anaRangeStart(){
   return UI.anaFrom;
 }
 function sessionsInRange(){ const a=anaRangeStart(),b=UI.anaRange==="custom"?UI.anaTo:todayKey();
-  return S.sessions.filter(s=>{const k=dayKey(new Date(s.startedAt));return k>=a&&k<=b;}); }
+  return S.sessions.filter(s=>{
+    // Gece yarısını aşan oturum, yerel başlangıç gününe aittir.
+    const k=dayKey(new Date(s.startedAt));return k>=a&&k<=b;
+  }); }
