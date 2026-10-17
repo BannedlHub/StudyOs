@@ -10,10 +10,10 @@
  * exams[].time | HH:mm | App.saveExam | views/exams.js, App.openExamDetail
  * tasks[].date | YYYY-MM-DD veya null | demo.js, App.saveTask/App.planForExam/App.applyPostpone/App.unscheduleTask | derived.js, views/overview.js, views/planner.js
  * tasks[].createdAt | YYYY-MM-DD yerel gün anahtarı | demo.js, App.saveTask/App.planForExam | demo.js yedek doğrulaması dışında okunmaz
- * topics[].lastStudiedAt | YYYY-MM-DD veya null | demo.js, App.saveFinishedSession/App.manualSession/App.saveQuestions | App.topicModal/App.topicDetail, views/subjects.js
+ * topics[].lastStudiedAt | YYYY-MM-DD veya null | demo.js, App.saveFinishedSession/App.saveManualSession/App.saveQuestions | App.topicModal/App.topicDetail, views/subjects.js
  * topics[].nextReviewAt | YYYY-MM-DD veya null | demo.js, App.saveFinishedSession/App.saveReview/App.applyReschedule/App.applySchedulePick | derived.js, App.topicModal/App.topicDetail, views/subjects.js, views/reviews.js
  * reviewLog[].date | YYYY-MM-DD yerel gün anahtarı | App.saveReview | views/reviews.js
- * sessions[].startedAt/endedAt | ISO 8601 UTC | demo.js, App.saveFinishedSession/App.manualSession/App.saveQuestions | derived.js, views/overview.js, views/analytics.js, views/sessions.js, App.exportCSV
+ * sessions[].startedAt/endedAt | ISO 8601 UTC | demo.js, App.saveFinishedSession/App.saveManualSession/App.saveQuestions | derived.js, views/overview.js, views/analytics.js, views/sessions.js, App.exportCSV
  * questionArchive[].createdAt | ISO 8601 UTC | App.saveQuestion | views/questions.js, App.questionDetail
  * IndexedDB assets.updatedAt | ISO 8601 UTC | App.uploadSchoolSchedule | views/settings.js
  * IndexedDB question-images.updatedAt | ISO 8601 UTC | App.saveQuestion/App.applyJSONImport | Zaman alanı okunmaz
